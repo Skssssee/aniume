@@ -2,148 +2,139 @@ const { client } = require('./telegram');
 const Anime = require('./models/Anime');
 const { Api } = require('telegram');
 const mongoose = require('mongoose');
-const bigInt = require('big-integer');
+
+// Jisshu-style streaming: raw invoke with math-aligned offsets
+// Based on: https://github.com/Jisshubot/Jisshu-filter-bot/blob/main/Jisshu/util/custom_dl.py
+const CHUNK_SIZE = 1024 * 1024; // 1MB chunks (same as Jisshu)
+
+async function* yieldFile(document, offset, firstPartCut, lastPartCut, partCount) {
+    let currentPart = 1;
+
+    const location = new Api.InputDocumentFileLocation({
+        id: document.id,
+        accessHash: document.accessHash,
+        fileReference: document.fileReference,
+        thumbSize: '',
+    });
+
+    while (currentPart <= partCount) {
+        const result = await client.invoke(
+            new Api.upload.GetFile({
+                location,
+                offset: offset,
+                limit: CHUNK_SIZE,
+                precise: true,
+            })
+        );
+
+        if (!result || !result.bytes || result.bytes.length === 0) break;
+
+        const chunk = result.bytes;
+
+        if (partCount === 1) {
+            // Only one chunk: trim both start and end
+            yield chunk.slice(firstPartCut, lastPartCut);
+        } else if (currentPart === 1) {
+            // First chunk: trim the start
+            yield chunk.slice(firstPartCut);
+        } else if (currentPart === partCount) {
+            // Last chunk: trim the end
+            yield chunk.slice(0, lastPartCut);
+        } else {
+            yield chunk;
+        }
+
+        currentPart++;
+        offset = offset + CHUNK_SIZE;
+    }
+}
 
 const streamFile = async (req, res, episode_id) => {
   try {
-    // Validate episode_id is a valid MongoDB ObjectId
     if (!mongoose.Types.ObjectId.isValid(episode_id)) {
         return res.status(400).send('Invalid Episode ID format.');
     }
+
     const anime = await Anime.findOne({ 'episodes._id': episode_id }, { 'episodes.$': 1 });
     if (!anime || !anime.episodes[0]) {
-      return res.status(404).send('Episode not found');
+        return res.status(404).send('Episode not found');
     }
 
     const episode = anime.episodes[0];
     const { chat_id, message_id } = episode;
 
     if (!chat_id || !message_id) {
-        return res.status(400).send('Old episodes without MTProto metadata cannot be streamed. Please re-index.');
+        return res.status(400).send('Episode not indexed with MTProto metadata. Please re-index.');
     }
 
-    // Fetch message to get media details
+    // Fetch the message from Telegram to get the document
     const messages = await client.getMessages(chat_id, { ids: [parseInt(message_id)] });
     if (!messages || messages.length === 0 || !messages[0].media) {
-      return res.status(404).send('Media not found on Telegram');
+        return res.status(404).send('Media not found on Telegram');
     }
 
-    const media = messages[0].media;
-    const document = media.document;
+    const document = messages[0].media.document;
     if (!document) return res.status(404).send('No document found in message');
 
-    const totalSize = Number(document.size);
+    const fileSize = Number(document.size);
     let mimeType = document.mimeType || 'video/mp4';
-    
-    // MKV is often not supported, mapping to video/webm can help browsers that support WebM
+
+    // Map MKV to a browser-compatible MIME type
     if (mimeType === 'video/x-matroska') {
         mimeType = 'video/webm';
     }
 
-    const range = req.headers.range;
-    res.setHeader('Accept-Ranges', 'bytes');
+    const rangeHeader = req.headers.range;
 
-    // --- FALLBACK LOGIC ---
-    // If GramJS is not connected OR the file is small, we can use the standard Bot API (20MB limit)
-    const canUseGramJS = client && client.connected;
-    
-    if (!canUseGramJS && totalSize < 20 * 1024 * 1024) {
-        console.log(`Using Bot API Fallback for small file: ${totalSize / 1024 / 1024}MB`);
-        const { getFilePath } = require('./telegram');
-        const filePath = await getFilePath(episode.file_id);
-        if (filePath) {
-            const botApiUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${filePath}`;
-            const axios = require('axios');
-            const botRes = await axios.get(botApiUrl, { responseType: 'stream', headers: { range: req.headers.range } });
-            res.writeHead(botRes.status, botRes.headers);
-            return botRes.data.pipe(res);
-        }
-    }
-
-    if (!canUseGramJS) {
-        return res.status(503).send('High-capacity streaming is temporarily unavailable due to Telegram FloodWait. Please try a smaller file or wait 30 minutes.');
-    }
-
-    // --- GramJS STREAMING ---
-    if (range) {
-      const parts = range.replace(/bytes=/, "").split("-");
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
-      const chunksize = (end - start) + 1;
-
-      const chunkSize = 512 * 1024; // 512KB
-      const alignedOffset = start - (start % chunkSize);
-      const firstPartCut = start - alignedOffset;
-      
-      console.log(`Streaming Range: ${start}-${end}/${totalSize} (Aligned: ${alignedOffset}) | ${episode.title}`);
-
-      res.writeHead(206, {
-        "Content-Range": `bytes ${start}-${end}/${totalSize}`,
-        "Accept-Ranges": "bytes",
-        "Content-Length": chunksize,
-        "Content-Type": mimeType,
-      });
-
-      // Stream chunks from GramJS
-      let bytesSent = 0;
-      let isFirstChunk = true;
-
-      for await (const chunk of client.iterDownload({
-        file: new Api.InputDocumentFileLocation({
-            id: document.id,
-            accessHash: document.accessHash,
-            fileReference: document.fileReference,
-            thumbSize: ""
-        }),
-        offset: bigInt(alignedOffset),
-        requestSize: chunkSize,
-      })) {
-        let currentChunk = chunk;
-        
-        // Trim the beginning of the first chunk if necessary
-        if (isFirstChunk && firstPartCut > 0) {
-            currentChunk = currentChunk.slice(firstPartCut);
-        }
-        isFirstChunk = false;
-
-        const bytesToTake = Math.min(currentChunk.length, chunksize - bytesSent);
-        const data = currentChunk.slice(0, bytesToTake);
-
-        if (!res.write(data)) {
-            await new Promise((resolve) => res.once('drain', resolve));
-        }
-
-        bytesSent += bytesToTake;
-        if (bytesSent >= chunksize) break;
-      }
-      res.end();
+    // Parse the Range header exactly like Jisshu does
+    let fromBytes, untilBytes;
+    if (rangeHeader) {
+        const parts = rangeHeader.replace('bytes=', '').split('-');
+        fromBytes = parseInt(parts[0], 10);
+        untilBytes = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
     } else {
-      console.log(`Streaming Full: ${totalSize} bytes | ${episode.title}`);
+        fromBytes = 0;
+        untilBytes = fileSize - 1;
+    }
 
-      res.writeHead(200, {
-        "Content-Length": totalSize,
-        "Content-Type": mimeType,
-      });
+    // Clamp values
+    untilBytes = Math.min(untilBytes, fileSize - 1);
 
-      for await (const chunk of client.iterDownload({
-        file: new Api.InputDocumentFileLocation({
-            id: document.id,
-            accessHash: document.accessHash,
-            fileReference: document.fileReference,
-            thumbSize: ""
-        }),
-        requestSize: 512 * 1024,
-      })) {
+    if (untilBytes < fromBytes) {
+        return res.status(416).set('Content-Range', `bytes */${fileSize}`).send('Range Not Satisfiable');
+    }
+
+    const reqLength = untilBytes - fromBytes + 1;
+
+    // Jisshu's math for aligned offset and part trimming
+    const offset = fromBytes - (fromBytes % CHUNK_SIZE);
+    const firstPartCut = fromBytes - offset;
+    const lastPartCut = (untilBytes % CHUNK_SIZE) + 1;
+    const partCount = Math.ceil(untilBytes / CHUNK_SIZE) - Math.floor(offset / CHUNK_SIZE);
+
+    console.log(`Streaming: bytes ${fromBytes}-${untilBytes}/${fileSize} | parts=${partCount} offset=${offset} | ${episode.title}`);
+
+    res.writeHead(rangeHeader ? 206 : 200, {
+        'Content-Type': mimeType,
+        'Content-Range': `bytes ${fromBytes}-${untilBytes}/${fileSize}`,
+        'Content-Length': reqLength,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'no-cache',
+    });
+
+    for await (const chunk of yieldFile(document, offset, firstPartCut, lastPartCut, partCount)) {
+        if (res.writableEnded) break;
         if (!res.write(chunk)) {
             await new Promise((resolve) => res.once('drain', resolve));
         }
-      }
-      res.end();
     }
+
+    if (!res.writableEnded) res.end();
+
   } catch (err) {
-    console.error('GramJS Streaming error:', err.message);
+    console.error('Streaming error:', err.message);
     if (!res.headersSent) {
-      res.status(500).send('Error streaming file via MTProto');
+        res.status(500).send('Streaming error: ' + err.message);
     }
   }
 };
