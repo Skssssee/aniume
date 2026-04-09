@@ -31,6 +31,10 @@ const streamFile = async (req, res, episode_id) => {
     const document = media.document;
     if (!document) return res.status(404).send('No document found in message');
 
+    const totalSize = Number(document.size);
+    const mimeType = document.mimeType || 'video/mp4';
+    const range = req.headers.range;
+
     // --- FALLBACK LOGIC ---
     // If GramJS is not connected OR the file is small, we can use the standard Bot API (20MB limit)
     const canUseGramJS = client && client.connected;
