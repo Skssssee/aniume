@@ -185,6 +185,13 @@ bot.command('total', async (ctx) => {
     }
 });
 
-bot.launch().then(() => console.log('Telegram Bot started...'));
+// Launch bot safely - don't crash server if there's a conflict
+bot.launch({ dropPendingUpdates: true }).catch((err) => {
+    if (err.response?.error_code === 409) {
+        console.warn('⚠️ Another bot instance is already running. This is OK - indexing is disabled on this instance but streaming still works.');
+    } else {
+        console.error('Bot launch error:', err.message);
+    }
+});
 
 module.exports = { getFilePath, bot, client };
