@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api';
 import { Play } from 'lucide-react';
 
 const Home = () => {
@@ -15,7 +15,7 @@ const Home = () => {
             const url = query 
                 ? `/api/search?q=${encodeURIComponent(query)}`
                 : '/api/search';
-            const res = await axios.get(url);
+            const res = await api.get(url);
             setAnimes(res.data);
         } catch (err) {
             console.error('Fetch error:', err);

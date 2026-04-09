@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api';
 import { PlayCircle, Info, Calendar } from 'lucide-react';
 
 const AnimeDetail = () => {
@@ -11,7 +11,7 @@ const AnimeDetail = () => {
     useEffect(() => {
         const fetchDetail = async () => {
             try {
-                const res = await axios.get(`/api/anime/${slug}`);
+                const res = await api.get(`/api/anime/${slug}`);
                 setAnime(res.data);
             } catch (err) {
                 console.error(err);

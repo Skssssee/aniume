@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useLocation, Link, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api';
 import { ArrowLeft, ChevronLeft, ChevronRight, Settings, Maximize } from 'lucide-react';
 
 const Watch = () => {
@@ -18,7 +18,7 @@ const Watch = () => {
         const fetchEpisode = async () => {
             try {
                 // We need the episode details and the context (anime) for next/prev
-                const animeRes = await axios.get(`/api/anime-by-ep/${id}`);
+                const animeRes = await api.get(`/api/anime-by-ep/${id}`);
                 setAnime(animeRes.data);
                 setEpisode(animeRes.data.episodes.find(e => e._id === id));
             } catch (err) {
@@ -51,7 +51,7 @@ const Watch = () => {
     if (loading) return <div className="container">Loading player...</div>;
     if (!episode) return <div className="container">Error loading episode.</div>;
 
-    const streamUrl = `/api/watch/${id}?hash=${hash}`;
+    const streamUrl = `${api.defaults.baseURL}/api/watch/${id}?hash=${hash}`;
 
     return (
         <div className="container" style={{ padding: '20px 0' }}>
