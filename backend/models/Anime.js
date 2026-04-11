@@ -4,8 +4,9 @@ const EpisodeSchema = new mongoose.Schema({
   episode_number: { type: Number, required: true },
   title: { type: String, required: true },
   file_id: { type: String },           // Telegram file_id (may be empty for URL episodes)
-  message_id: { type: Number },
-  chat_id: { type: String },
+  source_message_id: { type: Number }, // Original message ID in the source channel
+  message_id: { type: Number },        // Target message ID in the target channel
+  chat_id: { type: String },           // Target channel ID
   file_path: { type: String },         // Cached from Telegram
   file_size: { type: Number },
   mime_type: { type: String },

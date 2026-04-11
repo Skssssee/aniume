@@ -21,6 +21,11 @@ const JWT_ADMIN_SECRET = process.env.JWT_SECRET || 'streaming_key_778899';
 
 connectDB();
 
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
 app.use(cors({ exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'] }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
