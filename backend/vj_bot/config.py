@@ -5,7 +5,7 @@ class Config(object):
     # API Credentials
     API_ID = int(getenv("API_ID", "27479878"))
     API_HASH = getenv("API_HASH", "05f8dc8265d4c5df6376dded1d71c0ff")
-    BOT_TOKEN = getenv("BOT_TOKEN", "8660561204:AAFusw-i_Nim8cO2tk8FAwL_Xkbf_p_l0DI")
+    BOT_TOKEN = getenv("BOT_TOKEN", "8766875262:AAGjb9sE2r4GNq1J6s468afZ5CsfHrBAr6U")
     
     # MongoDB Config (NEW CLUSTER)
     DATABASE_URI = getenv("DATABASE_URI", "mongodb+srv://rajmanikumari741_db_user:ysAH1jUEwL6Ek315@rajmmamn.xevowds.mongodb.net/?appName=rajmmamn")
