@@ -28,7 +28,12 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(cors({ exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'] }));
+app.use(cors({
+  origin: '*', // Allows all origins (required for split deployment)
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length']
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 app.use(express.static(path.join(__dirname, '../frontend/dist')));
